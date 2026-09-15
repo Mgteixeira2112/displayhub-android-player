@@ -11,8 +11,8 @@ android {
         applicationId = "br.com.displayhub.player"
         minSdk = 23
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
 
         val supabaseUrl = providers.gradleProperty("DISPLAYHUB_SUPABASE_URL")
             .orElse("https://meqeluddtwthqmrtbhbr.supabase.co")
@@ -20,8 +20,34 @@ android {
         val configuredKey = providers.gradleProperty("DISPLAYHUB_SUPABASE_ANON_KEY").orNull?.trim()
         val publishableKey = configuredKey?.takeIf { it.isNotEmpty() }
             ?: "sb_publishable_yjnvIPUmi8-Kt7yTFibw3w_DQlawViE"
+        val updateManifestUrl = providers.gradleProperty("DISPLAYHUB_UPDATE_MANIFEST_URL")
+            .orElse("https://mgteixeira2112.github.io/displayhub-android-player/latest.json")
+            .get()
         buildConfigField("String", "SUPABASE_URL", "\"${supabaseUrl.replace("\"", "\\\"")}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${publishableKey.replace("\"", "\\\"")}\"")
+        buildConfigField("String", "UPDATE_MANIFEST_URL", "\"${updateManifestUrl.replace("\"", "\\\"")}\"")
+    }
+
+    signingConfigs {
+        val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")
+        val keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+        val keyAliasValue = System.getenv("ANDROID_KEY_ALIAS")
+        val keyPasswordValue = System.getenv("ANDROID_KEY_PASSWORD")
+        if (!keystoreFile.isNullOrBlank() && !keystorePassword.isNullOrBlank() && !keyAliasValue.isNullOrBlank() && !keyPasswordValue.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(keystoreFile)
+                storePassword = keystorePassword
+                keyAlias = keyAliasValue
+                keyPassword = keyPasswordValue
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
+            isMinifyEnabled = false
+        }
     }
 
     buildFeatures {
