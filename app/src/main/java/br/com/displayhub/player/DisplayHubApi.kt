@@ -12,6 +12,51 @@ class DisplayHubApi {
 
     data class Assignment(val status: String, val playerUrl: String?)
     data class RemoteCommand(val id: String, val command: String)
+    data class PairingSession(val pairingId: String, val code: String, val expiresAt: String)
+    data class PairingStatus(val status: String, val playerUrl: String?)
+
+    fun createAndroidPairing(
+        deviceId: String,
+        deviceSecret: String,
+        deviceLabel: String,
+        width: Int,
+        height: Int,
+    ): PairingSession {
+        val result = rpc(
+            "create_android_player_pairing",
+            JSONObject()
+                .put("p_device_id", deviceId)
+                .put("p_device_secret", deviceSecret)
+                .put("p_device_label", deviceLabel.trim().ifBlank { "DisplayHub Android" })
+                .put("p_screen_width", width)
+                .put("p_screen_height", height),
+        )
+        return PairingSession(
+            pairingId = result.getString("pairing_id"),
+            code = result.getString("code"),
+            expiresAt = result.optString("expires_at"),
+        )
+    }
+
+    fun pollPairing(pairingId: String, deviceId: String, deviceSecret: String): PairingStatus {
+        val result = rpc(
+            "poll_windows_player_pairing",
+            JSONObject()
+                .put("p_pairing_id", pairingId)
+                .put("p_device_id", deviceId)
+                .put("p_device_secret", deviceSecret),
+        )
+        val mappings = result.optJSONArray("mappings")
+        val playerUrl = if (mappings != null && mappings.length() > 0) {
+            mappings.optJSONObject(0)?.optString("display_url")?.takeIf { it.isNotBlank() }
+        } else {
+            null
+        }
+        return PairingStatus(
+            status = result.optString("status", "pending"),
+            playerUrl = playerUrl,
+        )
+    }
 
     fun activateInstallation(
         token: String,
