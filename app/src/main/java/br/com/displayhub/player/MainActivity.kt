@@ -16,6 +16,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -30,6 +31,7 @@ import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
     private lateinit var prefs: PlayerPrefs
+    private lateinit var videoCache: LocalVideoCache
     private val api = DisplayHubApi()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var executor: ScheduledExecutorService? = null
@@ -40,6 +42,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = PlayerPrefs(this)
+        videoCache = LocalVideoCache(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         if (prefs.kioskEnabled) enterImmersiveMode()
@@ -201,15 +204,70 @@ class MainActivity : AppCompatActivity() {
             settings.setSupportZoom(false)
             isVerticalScrollBarEnabled = false
             isHorizontalScrollBarEnabled = false
+            addJavascriptInterface(DisplayHubVideoBridge(videoCache), "DisplayHubAndroid")
             webChromeClient = WebChromeClient()
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = false
+
+                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                    if (request == null) return super.shouldInterceptRequest(view, request)
+                    return videoCache.intercept(request) ?: super.shouldInterceptRequest(view, request)
+                }
+
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    injectLocalVideoPlayback(view)
+                }
             }
             loadUrl(url)
         }
         webView = view
         setContentView(view)
         if (prefs.kioskEnabled) enterImmersiveMode()
+    }
+
+    private fun injectLocalVideoPlayback(view: WebView?) {
+        val script = """
+            (() => {
+              if (window.__displayHubLocalVideoReady) return;
+              window.__displayHubLocalVideoReady = true;
+              const localize = (video) => {
+                if (!video || video.dataset.dhLocalizing === 'true') return;
+                const src = video.dataset.dhRemoteSrc || video.currentSrc || video.src || '';
+                if (!/^https?:\/\//i.test(src) || src.includes('displayhub.local')) return;
+                try {
+                  const local = window.DisplayHubAndroid && window.DisplayHubAndroid.localizeVideo(src);
+                  if (!local || local === src) return;
+                  const time = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+                  const resume = !video.paused;
+                  video.dataset.dhLocalizing = 'true';
+                  video.dataset.dhRemoteSrc = src;
+                  video.src = local;
+                  video.load();
+                  video.addEventListener('loadedmetadata', () => {
+                    if (time > 0 && Number.isFinite(video.duration)) video.currentTime = Math.min(time, Math.max(0, video.duration - 0.05));
+                    if (resume) video.play().catch(() => {});
+                    video.dataset.dhLocalizing = 'false';
+                  }, { once: true });
+                } catch (_) {
+                  video.dataset.dhLocalizing = 'false';
+                }
+              };
+              const scan = (root) => {
+                if (!root) return;
+                if (root.matches && root.matches('video')) localize(root);
+                if (root.querySelectorAll) root.querySelectorAll('video').forEach(localize);
+              };
+              scan(document);
+              new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                  mutation.addedNodes.forEach(scan);
+                  if (mutation.type === 'attributes' && mutation.target instanceof HTMLVideoElement) localize(mutation.target);
+                });
+              }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+            })();
+        """.trimIndent()
+        view?.evaluateJavascript(script, null)
     }
 
     private fun startManagedLoop() {
