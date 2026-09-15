@@ -2,6 +2,7 @@ package br.com.displayhub.player
 
 import android.app.ActivityManager
 import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -116,41 +117,40 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 10, 0, 10)
         }
 
-        val activate = Button(this).apply {
-            text = "Ativar Player"
-            setOnClickListener {
-                val token = tokenInput.text.toString().trim()
-                if (token.length < 32) {
-                    feedback.text = "Token inválido. Gere um novo token no DisplayHub."
-                    return@setOnClickListener
-                }
-                isEnabled = false
-                feedback.text = "Ativando..."
-                Executors.newSingleThreadExecutor().execute {
-                    try {
-                        val metrics = resources.displayMetrics
-                        val label = labelInput.text.toString().trim().ifBlank {
-                            "Android ${Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID).takeLast(6)}"
-                        }
-                        api.activateInstallation(
-                            token = token,
-                            deviceId = prefs.deviceId,
-                            deviceSecret = prefs.deviceSecret,
-                            deviceLabel = label,
-                            width = metrics.widthPixels,
-                            height = metrics.heightPixels,
-                        )
-                        prefs.deviceLabel = label
-                        prefs.activated = true
-                        mainHandler.post {
-                            showPlayerWaiting()
-                            startManagedLoop()
-                        }
-                    } catch (error: Throwable) {
-                        mainHandler.post {
-                            activate.isEnabled = true
-                            feedback.text = error.message ?: "Falha ao ativar o player."
-                        }
+        val activate = Button(this)
+        activate.text = "Ativar Player"
+        activate.setOnClickListener {
+            val token = tokenInput.text.toString().trim()
+            if (token.length < 32) {
+                feedback.text = "Token inválido. Gere um novo token no DisplayHub."
+                return@setOnClickListener
+            }
+            activate.isEnabled = false
+            feedback.text = "Ativando..."
+            Executors.newSingleThreadExecutor().execute {
+                try {
+                    val metrics = resources.displayMetrics
+                    val label = labelInput.text.toString().trim().ifBlank {
+                        "Android ${Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID).takeLast(6)}"
+                    }
+                    api.activateInstallation(
+                        token = token,
+                        deviceId = prefs.deviceId,
+                        deviceSecret = prefs.deviceSecret,
+                        deviceLabel = label,
+                        width = metrics.widthPixels,
+                        height = metrics.heightPixels,
+                    )
+                    prefs.deviceLabel = label
+                    prefs.activated = true
+                    mainHandler.post {
+                        showPlayerWaiting()
+                        startManagedLoop()
+                    }
+                } catch (error: Throwable) {
+                    mainHandler.post {
+                        activate.isEnabled = true
+                        feedback.text = error.message ?: "Falha ao ativar o player."
                     }
                 }
             }
@@ -234,7 +234,7 @@ class MainActivity : AppCompatActivity() {
                     if (webView == null) statusView?.text = "Aguardando playlist ser associada no DisplayHub..."
                 }
             }
-        } catch (error: Throwable) {
+        } catch (_: Throwable) {
             mainHandler.post {
                 if (webView == null) statusView?.text = "Sem conexão. Tentando novamente automaticamente..."
             }
@@ -274,8 +274,9 @@ class MainActivity : AppCompatActivity() {
             "reboot_device" -> mainHandler.post {
                 val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
                 if (dpm.isDeviceOwnerApp(packageName)) {
+                    val admin = ComponentName(this, PlayerDeviceAdminReceiver::class.java)
                     completeCommand(command, true, "android:device_owner_reboot")
-                    dpm.reboot(null)
+                    dpm.reboot(admin)
                 } else {
                     completeCommand(command, false, "android:reboot_requires_device_owner")
                 }
