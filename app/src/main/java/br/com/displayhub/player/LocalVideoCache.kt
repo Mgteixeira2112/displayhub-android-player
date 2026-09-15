@@ -3,9 +3,12 @@ package br.com.displayhub.player
 import android.content.Context
 import android.net.Uri
 import android.util.Base64
+import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -18,20 +21,78 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 class LocalVideoCache(context: Context) {
+    companion object {
+        private const val TAG = "DisplayHubVideoCache"
+    }
+
     private val directory = File(context.filesDir, "displayhub-videos").apply { mkdirs() }
     private val locks = ConcurrentHashMap<String, Any>()
     private val downloads = ConcurrentHashMap.newKeySet<String>()
+    private val failures = ConcurrentHashMap.newKeySet<String>()
     private val downloader = Executors.newSingleThreadExecutor()
 
     fun localUrl(remoteUrl: String): String {
-        if (!remoteUrl.startsWith("https://") && !remoteUrl.startsWith("http://")) return remoteUrl
+        if (!isRemoteVideoUrl(remoteUrl)) return remoteUrl
         val cached = cachedFile(remoteUrl)
         if (cached == null) {
             prefetch(remoteUrl)
             return remoteUrl
         }
-        val encoded = Base64.encodeToString(remoteUrl.toByteArray(Charsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
-        return "https://displayhub.local/video/$encoded"
+        return localUrlFor(remoteUrl)
+    }
+
+    fun prefetchAll(remoteUrls: Collection<String>) {
+        remoteUrls
+            .asSequence()
+            .map { it.trim() }
+            .filter(::isRemoteVideoUrl)
+            .distinct()
+            .forEach(::prefetch)
+    }
+
+    fun status(remoteUrl: String): String {
+        if (!isRemoteVideoUrl(remoteUrl)) return "unsupported"
+        if (cachedFile(remoteUrl) != null) return "ready"
+        val key = sha256(remoteUrl)
+        return when {
+            downloads.contains(key) -> "downloading"
+            failures.contains(key) -> "failed"
+            else -> "missing"
+        }
+    }
+
+    fun snapshot(remoteUrls: Collection<String>): JSONObject {
+        val urls = remoteUrls
+            .asSequence()
+            .map { it.trim() }
+            .filter(::isRemoteVideoUrl)
+            .distinct()
+            .toList()
+
+        var ready = 0
+        var downloading = 0
+        var failed = 0
+        var missing = 0
+        val items = JSONArray()
+
+        urls.forEach { url ->
+            val state = status(url)
+            when (state) {
+                "ready" -> ready += 1
+                "downloading" -> downloading += 1
+                "failed" -> failed += 1
+                else -> missing += 1
+            }
+            items.put(JSONObject().put("url", url).put("status", state))
+        }
+
+        return JSONObject()
+            .put("total", urls.size)
+            .put("ready", ready)
+            .put("downloading", downloading)
+            .put("failed", failed)
+            .put("missing", missing)
+            .put("items", items)
     }
 
     fun intercept(request: WebResourceRequest): WebResourceResponse? {
@@ -45,6 +106,17 @@ class LocalVideoCache(context: Context) {
         return serveFile(request, remoteUrl, file)
     }
 
+    private fun isRemoteVideoUrl(remoteUrl: String): Boolean =
+        remoteUrl.startsWith("https://") || remoteUrl.startsWith("http://")
+
+    private fun localUrlFor(remoteUrl: String): String {
+        val encoded = Base64.encodeToString(
+            remoteUrl.toByteArray(Charsets.UTF_8),
+            Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
+        )
+        return "https://displayhub.local/video/$encoded"
+    }
+
     private fun cachedFile(remoteUrl: String): File? {
         val target = File(directory, sha256(remoteUrl))
         if (!target.exists() || target.length() <= 0) return null
@@ -55,9 +127,21 @@ class LocalVideoCache(context: Context) {
     private fun prefetch(remoteUrl: String) {
         val key = sha256(remoteUrl)
         if (cachedFile(remoteUrl) != null || !downloads.add(key)) return
+        failures.remove(key)
+        Log.d(TAG, "prefetch_queued key=$key")
         downloader.execute {
             try {
-                getOrDownload(remoteUrl)
+                val file = getOrDownload(remoteUrl)
+                if (file != null) {
+                    failures.remove(key)
+                    Log.d(TAG, "prefetch_ready key=$key bytes=${file.length()}")
+                } else {
+                    failures.add(key)
+                    Log.w(TAG, "prefetch_failed key=$key")
+                }
+            } catch (error: Throwable) {
+                failures.add(key)
+                Log.w(TAG, "prefetch_failed key=$key", error)
             } finally {
                 downloads.remove(key)
             }
@@ -151,7 +235,9 @@ class LocalVideoCache(context: Context) {
             connection.connect()
             val status = connection.responseCode
             val headers = mutableMapOf<String, String>()
-            connection.headerFields.forEach { (name, values) -> if (name != null && !values.isNullOrEmpty()) headers[name] = values.joinToString(",") }
+            connection.headerFields.forEach { (name, values) ->
+                if (name != null && !values.isNullOrEmpty()) headers[name] = values.joinToString(",")
+            }
             headers["Access-Control-Allow-Origin"] = "*"
             WebResourceResponse(
                 connection.contentType?.substringBefore(';') ?: mimeType(remoteUrl),
@@ -222,4 +308,26 @@ class LocalVideoCache(context: Context) {
 class DisplayHubVideoBridge(private val cache: LocalVideoCache) {
     @JavascriptInterface
     fun localizeVideo(url: String): String = cache.localUrl(url)
+
+    @JavascriptInterface
+    fun prefetchVideos(urlsJson: String): String {
+        val urls = parseUrls(urlsJson)
+        cache.prefetchAll(urls)
+        return cache.snapshot(urls).toString()
+    }
+
+    @JavascriptInterface
+    fun videoCacheStatus(urlsJson: String): String {
+        val urls = parseUrls(urlsJson)
+        return cache.snapshot(urls).toString()
+    }
+
+    private fun parseUrls(urlsJson: String): List<String> = runCatching {
+        val array = JSONArray(urlsJson)
+        buildList {
+            for (index in 0 until array.length()) {
+                array.optString(index)?.trim()?.takeIf { it.isNotBlank() }?.let(::add)
+            }
+        }
+    }.getOrDefault(emptyList())
 }
