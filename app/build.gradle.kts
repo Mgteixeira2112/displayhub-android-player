@@ -17,11 +17,11 @@ android {
         val supabaseUrl = providers.gradleProperty("DISPLAYHUB_SUPABASE_URL")
             .orElse("https://meqeluddtwthqmrtbhbr.supabase.co")
             .get()
-        val anonKey = providers.gradleProperty("DISPLAYHUB_SUPABASE_ANON_KEY")
-            .orElse("")
-            .get()
+        val configuredKey = providers.gradleProperty("DISPLAYHUB_SUPABASE_ANON_KEY").orNull?.trim()
+        val publishableKey = configuredKey?.takeIf { it.isNotEmpty() }
+            ?: "sb_publishable_yjnvIPUmi8-Kt7yTFibw3w_DQlawViE"
         buildConfigField("String", "SUPABASE_URL", "\"${supabaseUrl.replace("\"", "\\\"")}\"")
-        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${anonKey.replace("\"", "\\\"")}\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${publishableKey.replace("\"", "\\\"")}\"")
     }
 
     buildFeatures {
