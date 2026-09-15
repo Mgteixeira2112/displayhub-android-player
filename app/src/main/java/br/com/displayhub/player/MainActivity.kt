@@ -36,6 +36,7 @@ class MainActivity : AppCompatActivity() {
     private val api = DisplayHubApi()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var executor: ScheduledExecutorService? = null
+    private var pairingExecutor: ScheduledExecutorService? = null
     private var webView: WebView? = null
     private var statusView: TextView? = null
     private var currentUrl: String? = null
@@ -68,6 +69,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         stopManagedLoop()
+        stopPairingLoop()
         webView?.destroy()
         webView = null
         super.onDestroy()
@@ -75,6 +77,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showActivationScreen() {
         stopManagedLoop()
+        stopPairingLoop()
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -90,7 +94,99 @@ class MainActivity : AppCompatActivity() {
         }, linearMatchWrap())
 
         root.addView(TextView(this).apply {
-            text = "Informe o token de instalação gerado no DisplayHub"
+            text = "No DisplayHub, abra Ativar Player por código e informe o código abaixo"
+            setTextColor(Color.LTGRAY)
+            textSize = 17f
+            gravity = Gravity.CENTER
+            setPadding(0, 16, 0, 20)
+        }, linearMatchWrap())
+
+        val codeView = TextView(this).apply {
+            text = "------"
+            setTextColor(Color.WHITE)
+            textSize = 42f
+            gravity = Gravity.CENTER
+            setPadding(0, 18, 0, 18)
+        }
+        root.addView(codeView, linearMatchWrap())
+
+        val feedback = TextView(this).apply {
+            text = "Gerando código..."
+            setTextColor(Color.LTGRAY)
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setPadding(0, 10, 0, 16)
+        }
+        root.addView(feedback, linearMatchWrap())
+
+        val refresh = Button(this).apply {
+            text = "Gerar novo código"
+            isEnabled = false
+        }
+        root.addView(refresh, linearMatchWrap())
+
+        val fallback = Button(this).apply {
+            text = "Usar token de instalação"
+            setOnClickListener { showTokenActivationScreen() }
+        }
+        root.addView(fallback, linearMatchWrap())
+
+        setContentView(root)
+
+        fun requestCode() {
+            stopPairingLoop()
+            refresh.isEnabled = false
+            codeView.text = "------"
+            feedback.text = "Gerando código..."
+            Executors.newSingleThreadExecutor().execute {
+                try {
+                    val metrics = resources.displayMetrics
+                    val label = prefs.deviceLabel ?: "Android ${Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID).takeLast(6)}"
+                    val session = api.createAndroidPairing(
+                        deviceId = prefs.deviceId,
+                        deviceSecret = prefs.deviceSecret,
+                        deviceLabel = label,
+                        width = metrics.widthPixels,
+                        height = metrics.heightPixels,
+                    )
+                    prefs.deviceLabel = label
+                    mainHandler.post {
+                        codeView.text = session.code
+                        feedback.text = "Código válido por 10 minutos. Aguardando ativação no DisplayHub..."
+                        refresh.isEnabled = true
+                        startPairingLoop(session.pairingId, feedback)
+                    }
+                } catch (error: Throwable) {
+                    mainHandler.post {
+                        refresh.isEnabled = true
+                        feedback.text = error.message ?: "Não foi possível gerar o código."
+                    }
+                }
+            }
+        }
+
+        refresh.setOnClickListener { requestCode() }
+        requestCode()
+    }
+
+    private fun showTokenActivationScreen() {
+        stopPairingLoop()
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(48, 48, 48, 48)
+            setBackgroundColor(Color.rgb(8, 15, 30))
+        }
+
+        root.addView(TextView(this).apply {
+            text = "DisplayHub Player"
+            setTextColor(Color.WHITE)
+            textSize = 30f
+            gravity = Gravity.CENTER
+        }, linearMatchWrap())
+
+        root.addView(TextView(this).apply {
+            text = "Ativação avançada por token"
             setTextColor(Color.LTGRAY)
             textSize = 17f
             gravity = Gravity.CENTER
@@ -112,6 +208,7 @@ class MainActivity : AppCompatActivity() {
             setSingleLine(true)
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
+            setText(prefs.deviceLabel.orEmpty())
         }
         root.addView(labelInput, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             bottomMargin = 20
@@ -163,8 +260,48 @@ class MainActivity : AppCompatActivity() {
             }
         }
         root.addView(activate, linearMatchWrap())
+
+        root.addView(Button(this).apply {
+            text = "Voltar para ativação por código"
+            setOnClickListener { showActivationScreen() }
+        }, linearMatchWrap())
+
         root.addView(feedback, linearMatchWrap())
         setContentView(root)
+    }
+
+    private fun startPairingLoop(pairingId: String, feedback: TextView) {
+        stopPairingLoop()
+        pairingExecutor = Executors.newSingleThreadScheduledExecutor().also { scheduler ->
+            scheduler.scheduleWithFixedDelay({
+                try {
+                    val result = api.pollPairing(pairingId, prefs.deviceId, prefs.deviceSecret)
+                    if (result.status == "claimed" && !result.playerUrl.isNullOrBlank()) {
+                        prefs.activated = true
+                        prefs.playerUrl = result.playerUrl
+                        stopPairingLoop()
+                        mainHandler.post {
+                            showWebPlayer(result.playerUrl)
+                            startManagedLoop()
+                        }
+                    } else if (result.status == "expired") {
+                        stopPairingLoop()
+                        mainHandler.post {
+                            feedback.text = "Código expirado. Gere um novo código."
+                        }
+                    }
+                } catch (_: Throwable) {
+                    mainHandler.post {
+                        feedback.text = "Sem conexão. Tentando novamente automaticamente..."
+                    }
+                }
+            }, 0, 2, TimeUnit.SECONDS)
+        }
+    }
+
+    private fun stopPairingLoop() {
+        pairingExecutor?.shutdownNow()
+        pairingExecutor = null
     }
 
     private fun showPlayerWaiting() {
