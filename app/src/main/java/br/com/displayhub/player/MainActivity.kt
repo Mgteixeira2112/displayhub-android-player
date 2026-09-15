@@ -32,6 +32,7 @@ import java.util.concurrent.TimeUnit
 class MainActivity : AppCompatActivity() {
     private lateinit var prefs: PlayerPrefs
     private lateinit var videoCache: LocalVideoCache
+    private lateinit var autoUpdater: AutoUpdater
     private val api = DisplayHubApi()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var executor: ScheduledExecutorService? = null
@@ -43,18 +44,21 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         prefs = PlayerPrefs(this)
         videoCache = LocalVideoCache(this)
+        autoUpdater = AutoUpdater(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         if (prefs.kioskEnabled) enterImmersiveMode()
 
         if (prefs.activated) showPlayerWaiting()
         else showActivationScreen()
+        autoUpdater.checkIfDue()
     }
 
     override fun onResume() {
         super.onResume()
         if (prefs.kioskEnabled) enterImmersiveMode()
         if (prefs.activated) startManagedLoop()
+        autoUpdater.checkIfDue()
     }
 
     override fun onPause() {
