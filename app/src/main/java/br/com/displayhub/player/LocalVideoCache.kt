@@ -15,13 +15,21 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 
 class LocalVideoCache(context: Context) {
     private val directory = File(context.filesDir, "displayhub-videos").apply { mkdirs() }
     private val locks = ConcurrentHashMap<String, Any>()
+    private val downloads = ConcurrentHashMap.newKeySet<String>()
+    private val downloader = Executors.newSingleThreadExecutor()
 
     fun localUrl(remoteUrl: String): String {
         if (!remoteUrl.startsWith("https://") && !remoteUrl.startsWith("http://")) return remoteUrl
+        val cached = cachedFile(remoteUrl)
+        if (cached == null) {
+            prefetch(remoteUrl)
+            return remoteUrl
+        }
         val encoded = Base64.encodeToString(remoteUrl.toByteArray(Charsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
         return "https://displayhub.local/video/$encoded"
     }
@@ -33,8 +41,27 @@ class LocalVideoCache(context: Context) {
         val remoteUrl = runCatching {
             String(Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING), Charsets.UTF_8)
         }.getOrNull() ?: return null
-        val file = getOrDownload(remoteUrl) ?: return proxyRemote(request, remoteUrl)
+        val file = cachedFile(remoteUrl) ?: return proxyRemote(request, remoteUrl)
         return serveFile(request, remoteUrl, file)
+    }
+
+    private fun cachedFile(remoteUrl: String): File? {
+        val target = File(directory, sha256(remoteUrl))
+        if (!target.exists() || target.length() <= 0) return null
+        target.setLastModified(System.currentTimeMillis())
+        return target
+    }
+
+    private fun prefetch(remoteUrl: String) {
+        val key = sha256(remoteUrl)
+        if (cachedFile(remoteUrl) != null || !downloads.add(key)) return
+        downloader.execute {
+            try {
+                getOrDownload(remoteUrl)
+            } finally {
+                downloads.remove(key)
+            }
+        }
     }
 
     private fun getOrDownload(remoteUrl: String): File? {
@@ -54,7 +81,7 @@ class LocalVideoCache(context: Context) {
                     readTimeout = 60000
                     instanceFollowRedirects = true
                     requestMethod = "GET"
-                    setRequestProperty("User-Agent", "DisplayHub-Android-Player/0.1")
+                    setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 Chrome/120 Safari/537.36")
                 }
                 connection.connect()
                 if (connection.responseCode !in 200..299) {
@@ -119,7 +146,7 @@ class LocalVideoCache(context: Context) {
                 instanceFollowRedirects = true
                 requestMethod = request.method
                 request.requestHeaders["Range"]?.let { setRequestProperty("Range", it) }
-                setRequestProperty("User-Agent", "DisplayHub-Android-Player/0.1")
+                request.requestHeaders["User-Agent"]?.takeIf { it.isNotBlank() }?.let { setRequestProperty("User-Agent", it) }
             }
             connection.connect()
             val status = connection.responseCode
