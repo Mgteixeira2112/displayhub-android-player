@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">DisplayHub Player</string>
+    <string name="device_admin_description">Permite recursos de gerenciamento dedicado do DisplayHub Player.</string>
+</resources>
