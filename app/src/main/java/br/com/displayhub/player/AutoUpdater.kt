@@ -5,7 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.widget.Toast
 import androidx.core.content.FileProvider
 import org.json.JSONObject
 import java.io.File
@@ -13,10 +12,21 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class AutoUpdater(private val activity: Activity) {
     private val executor = Executors.newSingleThreadExecutor()
+    private val scheduler = Executors.newSingleThreadScheduledExecutor()
     private val prefs = activity.getSharedPreferences("displayhub_updater", Activity.MODE_PRIVATE)
+
+    init {
+        scheduler.scheduleWithFixedDelay(
+            { checkIfDue() },
+            CHECK_INTERVAL_MS,
+            CHECK_INTERVAL_MS,
+            TimeUnit.MILLISECONDS,
+        )
+    }
 
     data class UpdateInfo(
         val versionCode: Long,
@@ -37,7 +47,7 @@ class AutoUpdater(private val activity: Activity) {
                 val installed = currentVersionCode()
                 if (update.versionCode <= installed) return@execute
                 val apk = downloadUpdate(update)
-                activity.runOnUiThread { requestInstall(apk, update.versionName) }
+                activity.runOnUiThread { requestInstall(apk) }
             } catch (_: Throwable) {
             }
         }
@@ -99,9 +109,8 @@ class AutoUpdater(private val activity: Activity) {
         return target
     }
 
-    private fun requestInstall(apk: File, versionName: String) {
+    private fun requestInstall(apk: File) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !activity.packageManager.canRequestPackageInstalls()) {
-            Toast.makeText(activity, "Atualização $versionName pronta. Autorize o DisplayHub a instalar atualizações.", Toast.LENGTH_LONG).show()
             val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}"))
             activity.startActivity(intent)
             prefs.edit().putLong("last_check", 0L).apply()
@@ -113,7 +122,6 @@ class AutoUpdater(private val activity: Activity) {
             setDataAndType(uri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        Toast.makeText(activity, "Atualização $versionName pronta para instalar.", Toast.LENGTH_LONG).show()
         activity.startActivity(intent)
     }
 
@@ -131,6 +139,6 @@ class AutoUpdater(private val activity: Activity) {
     }
 
     companion object {
-        private const val CHECK_INTERVAL_MS = 6L * 60L * 60L * 1000L
+        private const val CHECK_INTERVAL_MS = 15L * 60L * 1000L
     }
 }
