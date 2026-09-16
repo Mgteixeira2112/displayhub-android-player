@@ -33,11 +33,7 @@ class LocalVideoCache(context: Context) {
 
     fun localUrl(remoteUrl: String): String {
         if (!isRemoteVideoUrl(remoteUrl)) return remoteUrl
-        val cached = cachedFile(remoteUrl)
-        if (cached == null) {
-            prefetch(remoteUrl)
-            return remoteUrl
-        }
+        if (cachedFile(remoteUrl) == null) prefetch(remoteUrl)
         return localUrlFor(remoteUrl)
     }
 
@@ -97,17 +93,26 @@ class LocalVideoCache(context: Context) {
 
     fun intercept(request: WebResourceRequest): WebResourceResponse? {
         val uri = request.url
-        if (uri.host != "displayhub.local" || !uri.path.orEmpty().startsWith("/video/")) return null
-        val encoded = uri.lastPathSegment ?: return null
-        val remoteUrl = runCatching {
-            String(Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING), Charsets.UTF_8)
-        }.getOrNull() ?: return null
-        val file = cachedFile(remoteUrl) ?: return proxyRemote(request, remoteUrl)
+        if (uri.host == "displayhub.local" && uri.path.orEmpty().startsWith("/video/")) {
+            val encoded = uri.lastPathSegment ?: return unavailableResponse()
+            val remoteUrl = runCatching {
+                String(Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING), Charsets.UTF_8)
+            }.getOrNull() ?: return unavailableResponse()
+            val file = cachedFile(remoteUrl) ?: return unavailableResponse()
+            return serveFile(request, remoteUrl, file)
+        }
+
+        val remoteUrl = uri.toString()
+        if (!isRemoteVideoUrl(remoteUrl)) return null
+        val file = cachedFile(remoteUrl) ?: return unavailableResponse()
         return serveFile(request, remoteUrl, file)
     }
 
-    private fun isRemoteVideoUrl(remoteUrl: String): Boolean =
-        remoteUrl.startsWith("https://") || remoteUrl.startsWith("http://")
+    private fun isRemoteVideoUrl(remoteUrl: String): Boolean {
+        if (!remoteUrl.startsWith("https://") && !remoteUrl.startsWith("http://")) return false
+        val path = runCatching { Uri.parse(remoteUrl).path.orEmpty().lowercase() }.getOrDefault("")
+        return path.endsWith(".mp4") || path.endsWith(".m4v") || path.endsWith(".webm")
+    }
 
     private fun localUrlFor(remoteUrl: String): String {
         val encoded = Base64.encodeToString(
@@ -191,6 +196,15 @@ class LocalVideoCache(context: Context) {
         }
     }
 
+    private fun unavailableResponse(): WebResourceResponse = WebResourceResponse(
+        "text/plain",
+        "utf-8",
+        503,
+        "Video not ready",
+        mapOf("Cache-Control" to "no-store", "Access-Control-Allow-Origin" to "*"),
+        ByteArrayInputStream(ByteArray(0)),
+    )
+
     private fun serveFile(request: WebResourceRequest, remoteUrl: String, file: File): WebResourceResponse {
         val total = file.length()
         val range = parseRange(request.requestHeaders["Range"], total)
@@ -220,36 +234,6 @@ class LocalVideoCache(context: Context) {
         headers["Content-Length"] = length.toString()
         headers["Content-Range"] = "bytes $start-$end/$total"
         return WebResourceResponse(mime, null, 206, "Partial Content", headers, LimitedInputStream(input, length))
-    }
-
-    private fun proxyRemote(request: WebResourceRequest, remoteUrl: String): WebResourceResponse? {
-        return try {
-            val connection = (URL(remoteUrl).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 15000
-                readTimeout = 60000
-                instanceFollowRedirects = true
-                requestMethod = request.method
-                request.requestHeaders["Range"]?.let { setRequestProperty("Range", it) }
-                request.requestHeaders["User-Agent"]?.takeIf { it.isNotBlank() }?.let { setRequestProperty("User-Agent", it) }
-            }
-            connection.connect()
-            val status = connection.responseCode
-            val headers = mutableMapOf<String, String>()
-            connection.headerFields.forEach { (name, values) ->
-                if (name != null && !values.isNullOrEmpty()) headers[name] = values.joinToString(",")
-            }
-            headers["Access-Control-Allow-Origin"] = "*"
-            WebResourceResponse(
-                connection.contentType?.substringBefore(';') ?: mimeType(remoteUrl),
-                null,
-                status,
-                connection.responseMessage ?: if (status == 206) "Partial Content" else "OK",
-                headers,
-                if (request.method.equals("HEAD", ignoreCase = true)) ByteArrayInputStream(ByteArray(0)) else connection.inputStream,
-            )
-        } catch (_: Throwable) {
-            null
-        }
     }
 
     private fun parseRange(value: String?, total: Long): Pair<Long, Long>? {
