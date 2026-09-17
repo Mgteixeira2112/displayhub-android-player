@@ -25,6 +25,18 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".DiagnosticActivity"
+            android:exported="true"
+            android:label="DisplayHub Diagnóstico"
+            android:screenOrientation="sensorLandscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"
