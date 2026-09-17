@@ -40,15 +40,8 @@ class LauncherActivity : AppCompatActivity() {
                 finish()
             }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        root.addView(Button(this).apply {
-            text = "Comparar vídeo no Android nativo"
-            setOnClickListener {
-                startActivity(Intent(this@LauncherActivity, NativeVideoDiagnosticActivity::class.java))
-                finish()
-            }
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(TextView(this).apply {
-            text = "Os diagnósticos usam a página já pareada. Pressione Voltar para encerrar o teste."
+            text = "O diagnóstico usa a página já pareada. Pressione Voltar para encerrar o teste."
             textSize = 16f
             gravity = Gravity.CENTER
             setTextColor(Color.LTGRAY)
