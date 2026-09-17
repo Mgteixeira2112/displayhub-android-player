@@ -60,7 +60,7 @@ class DiagnosticActivity : AppCompatActivity() {
                       var ownStyle = window.getComputedStyle(video);
                       if (ownStyle && (ownStyle.display === 'none' || ownStyle.visibility === 'hidden' || ownStyle.opacity === '0')) visible = false;
                       if (!video.__dhPassiveDiagnostics) {
-                        var stats = {last:'nenhum',waiting:0,stalled:0,progress:0,loadeddata:0,playing:0,error:0,suspend:0,canplay:0};
+                        let stats = {last:'nenhum',waiting:0,stalled:0,progress:0,loadeddata:0,playing:0,error:0,suspend:0,canplay:0};
                         video.__dhPassiveDiagnostics = stats;
                         ['waiting','stalled','progress','loadeddata','playing','error','suspend','canplay','emptied','abort'].forEach(function (eventName) {
                           video.addEventListener(eventName, function () {
@@ -187,7 +187,7 @@ class DiagnosticActivity : AppCompatActivity() {
             text = "Sair"
             setOnClickListener { finish() }
         }, matchWrap())
-        val scroll = ScrollView(this).apply { fillViewport = true; addView(root) }
+        val scroll = ScrollView(this).apply { setFillViewport(true); addView(root) }
         setContentView(scroll)
     }
 
