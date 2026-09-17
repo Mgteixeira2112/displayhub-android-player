@@ -13,10 +13,8 @@
         android:usesCleartextTraffic="false">
 
         <activity
-            android:name=".MainActivity"
-            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:name=".LauncherActivity"
             android:exported="true"
-            android:launchMode="singleTask"
             android:screenOrientation="sensorLandscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -26,16 +24,17 @@
         </activity>
 
         <activity
+            android:name=".MainActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:screenOrientation="sensorLandscape" />
+
+        <activity
             android:name=".DiagnosticActivity"
-            android:exported="true"
+            android:exported="false"
             android:label="DisplayHub Diagnóstico"
-            android:screenOrientation="sensorLandscape">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:screenOrientation="sensorLandscape" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
