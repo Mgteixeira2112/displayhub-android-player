@@ -36,12 +36,6 @@
             android:label="DisplayHub Diagnóstico"
             android:screenOrientation="sensorLandscape" />
 
-        <activity
-            android:name=".NativeVideoDiagnosticActivity"
-            android:exported="false"
-            android:label="DisplayHub Teste Nativo"
-            android:screenOrientation="sensorLandscape" />
-
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"
