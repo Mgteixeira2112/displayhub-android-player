@@ -37,7 +37,8 @@ class DiagnosticActivity : AppCompatActivity() {
             if (!testing) return
             val view = playerView ?: return
             attempts += 1
-            lastResult = "Consulta $attempts iniciada; aguardando resposta do WebView."
+            val sequence = attempts
+            if (sequence == 1) lastResult = "Consulta iniciada; aguardando resposta do WebView."
             view.evaluateJavascript("""
                 (function () {
                   try {
@@ -45,20 +46,33 @@ class DiagnosticActivity : AppCompatActivity() {
                     var frames = document.querySelectorAll('iframe').length;
                     var canvas = document.querySelectorAll('canvas').length;
                     var state = document.readyState || 'indefinido';
-                    if (!videos.length) return JSON.stringify({ok:true,page:state,count:0,frames:frames,canvas:canvas});
-                    var selected = 0;
-                    for (var i = 0; i < videos.length && i < 25; i++) {
-                      if ((videos[i].error && videos[i].error.code) || videos[i].readyState === 0 || videos[i].videoWidth === 0) {
-                        selected = i;
-                        break;
+                    var results = [];
+                    for (var i = 0; i < videos.length && i < 4; i++) {
+                      var video = videos[i];
+                      var rect = video.getBoundingClientRect();
+                      var onScreen = rect.width > 1 && rect.height > 1 && rect.right > 0 && rect.bottom > 0 && rect.left < window.innerWidth && rect.top < window.innerHeight;
+                      var hiddenParent = false;
+                      var node = video.parentElement;
+                      while (node && node !== document.documentElement) {
+                        if (node.getAttribute('aria-hidden') === 'true') hiddenParent = true;
+                        if (window.getComputedStyle) {
+                          var style = window.getComputedStyle(node);
+                          if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) onScreen = false;
+                        }
+                        node = node.parentElement;
                       }
+                      if (window.getComputedStyle) {
+                        var ownStyle = window.getComputedStyle(video);
+                        if (ownStyle && (ownStyle.display === 'none' || ownStyle.visibility === 'hidden' || ownStyle.opacity === '0')) onScreen = false;
+                      }
+                      var source = video.querySelector('source');
+                      var url = video.currentSrc || video.src || (source && source.src) || '';
+                      var kind = !url ? 'sem fonte' : /^blob:/i.test(url) ? 'blob' : /^https?:/i.test(url) ? 'http(s)' : 'outra';
+                      var clean = url.split('?')[0].split('#')[0].toLowerCase();
+                      var format = clean.slice(-5) === '.webm' ? 'webm' : clean.slice(-4) === '.mp4' ? 'mp4' : clean.slice(-5) === '.m3u8' ? 'hls' : 'indefinido';
+                      results.push({index:i+1,role:onScreen ? 'na tela' : (hiddenParent ? 'pré-carregamento' : 'fora da tela'),ready:video.readyState,network:video.networkState,error:video.error ? video.error.code : 0,width:video.videoWidth,height:video.videoHeight,seconds:Math.floor(video.currentTime || 0),paused:video.paused,source:kind,format:format,webm:video.canPlayType('video/webm') || 'não',mp4:video.canPlayType('video/mp4') || 'não'});
                     }
-                    var video = videos[selected];
-                    var source = video.querySelector('source');
-                    var url = video.currentSrc || video.src || (source && source.src) || '';
-                    var kind = !url ? 'sem fonte' : /^blob:/i.test(url) ? 'blob' : /^https?:/i.test(url) ? 'http(s)' : 'outra';
-                    var mime = video.getAttribute('type') || (source && source.getAttribute('type')) || 'não declarado';
-                    return JSON.stringify({ok:true,page:state,count:videos.length,index:selected + 1,frames:frames,canvas:canvas,ready:video.readyState,network:video.networkState,error:video.error ? video.error.code : 0,width:video.videoWidth,height:video.videoHeight,seconds:Math.floor(video.currentTime || 0),paused:video.paused,source:kind,mime:mime});
+                    return JSON.stringify({ok:true,page:state,count:videos.length,frames:frames,canvas:canvas,videos:results});
                   } catch (e) {
                     return JSON.stringify({ok:false});
                   }
@@ -73,32 +87,37 @@ class DiagnosticActivity : AppCompatActivity() {
                         else -> null
                     }
                     if (data == null || !data.optBoolean("ok", false)) {
-                        lastResult = "Consulta $attempts: a página não retornou dados de mídia."
+                        lastResult = "Consulta $sequence: a página não retornou dados de mídia."
                     } else {
                         val count = data.optInt("count", 0)
                         val elapsed = (SystemClock.elapsedRealtime() - startedAt) / 1000
-                        lastResult = if (count == 0) {
-                            "Vídeos HTML: 0 | iframes: ${data.optInt("frames", 0)} | canvas: ${data.optInt("canvas", 0)} | documento: ${data.optString("page", "?")} | ${elapsed}s."
-                        } else {
-                            val error = data.optInt("error", 0)
-                            val ready = data.optInt("ready", 0)
-                            val width = data.optInt("width", 0)
-                            val height = data.optInt("height", 0)
-                            val cause = when {
-                                error == 2 -> "ERRO DE REDE"
-                                error == 3 -> "ERRO DE DECODIFICAÇÃO"
-                                error == 4 -> "FONTE NÃO SUPORTADA"
-                                error == 1 -> "REPRODUÇÃO INTERROMPIDA"
-                                elapsed >= 10 && ready == 0 -> "SEM DADOS DE VÍDEO"
-                                elapsed >= 10 && width == 0 -> "SEM DIMENSÕES DE VÍDEO"
-                                else -> "estado observado; imagem não confirmada"
+                        val rows = data.optJSONArray("videos")
+                        val report = StringBuilder("Vídeos HTML: $count | iframes: ${data.optInt("frames", 0)} | documento: ${data.optString("page", "?")} | ${elapsed}s.")
+                        if (count == 0) report.append(" Nenhum elemento de vídeo encontrado neste documento.")
+                        if (rows != null) {
+                            for (index in 0 until rows.length()) {
+                                val video = rows.optJSONObject(index) ?: continue
+                                val error = video.optInt("error", 0)
+                                val ready = video.optInt("ready", 0)
+                                val role = video.optString("role", "?")
+                                val condition = when {
+                                    error == 2 -> "ERRO DE REDE"
+                                    error == 3 -> "ERRO DE DECODIFICAÇÃO"
+                                    error == 4 -> "FONTE NÃO SUPORTADA"
+                                    error == 1 -> "REPRODUÇÃO INTERROMPIDA"
+                                    ready == 0 -> "SEM METADADOS"
+                                    video.optBoolean("paused", false) && role == "na tela" -> "VÍDEO VISÍVEL PAUSADO"
+                                    else -> "estado observado"
+                                }
+                                report.append("\nVídeo ${video.optInt("index", index + 1)} [$role]: $condition | erro=$error pronto=$ready rede=${video.optInt("network", 0)} | ${video.optInt("width", 0)}x${video.optInt("height", 0)} | tempo=${video.optInt("seconds", 0)}s pausado=${video.optBoolean("paused", false)} | fonte=${video.optString("source", "?")} formato=${video.optString("format", "?")} | suporte webm=${video.optString("webm", "?")} mp4=${video.optString("mp4", "?")}.")
                             }
-                            "$cause | vídeo ${data.optInt("index", 1)}/$count | erro=$error | pronto=$ready | rede=${data.optInt("network", 0)} | dimensão=${width}x$height | tempo=${data.optInt("seconds", 0)}s | pausado=${data.optBoolean("paused", false)} | fonte=${data.optString("source", "?")} | tipo=${data.optString("mime", "?").take(30)} | ${elapsed}s."
                         }
+                        if (count > 4) report.append("\nApenas os 4 primeiros vídeos foram inspecionados.")
+                        lastResult = report.toString()
                     }
-                    statusView?.text = "DIAGNÓSTICO ${BuildConfig.VERSION_NAME} | Consulta $attempts recebida. Pressione VOLTAR para ver o relatório."
+                    statusView?.text = "DIAGNÓSTICO ${BuildConfig.VERSION_NAME} | Consulta $sequence recebida. Pressione VOLTAR para ver o relatório."
                 } catch (_: Exception) {
-                    lastResult = "Consulta $attempts: resposta inválida do WebView."
+                    lastResult = "Consulta $sequence: resposta inválida do WebView."
                 }
             }
             handler.postDelayed(this, 3_000)
