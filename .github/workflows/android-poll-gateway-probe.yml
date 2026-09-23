@@ -29,7 +29,7 @@ jobs:
             shift
             local out="/tmp/${name}.body"
             local status
-            status="$(curl --fail-with-body --connect-timeout 12 --max-time 25 -sS -o "$out" -w '%{http_code}' \
+            status="$(curl --http1.1 --fail-with-body --connect-timeout 12 --max-time 25 -sS -o "$out" -w '%{http_code}' \
               -X POST "$ENDPOINT" \
               -H "Content-Type: application/json" \
               -H "apikey: $KEY" \
@@ -45,3 +45,6 @@ jobs:
 
           probe "apikey_only"
           probe "apikey_plus_bearer" -H "Authorization: Bearer $KEY"
+          probe "dalvik_apikey_only" -H "User-Agent: Dalvik/2.1.0 (Linux; U; Android TV)"
+          probe "dalvik_plus_bearer" -H "User-Agent: Dalvik/2.1.0 (Linux; U; Android TV)" -H "Authorization: Bearer $KEY"
+          probe "empty_user_agent" -H "User-Agent:"
