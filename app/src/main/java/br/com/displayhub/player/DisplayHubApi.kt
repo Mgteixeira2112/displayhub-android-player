@@ -141,10 +141,9 @@ class DisplayHubApi {
         connection.doOutput = true
         connection.setRequestProperty("Content-Type", "application/json")
         connection.setRequestProperty("apikey", anonKey)
-        // Publishable keys are not JWTs. Legacy anon JWT keys retain their bearer header.
-        if (!anonKey.startsWith("sb_publishable_")) {
-            connection.setRequestProperty("Authorization", "Bearer $anonKey")
-        }
+        // Keep the request format used by the registered web player and by Android 0.4.11,
+        // which reached poll_registered_device_assignment successfully on the real device.
+        connection.setRequestProperty("Authorization", "Bearer $anonKey")
         connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
 
         val status = connection.responseCode
