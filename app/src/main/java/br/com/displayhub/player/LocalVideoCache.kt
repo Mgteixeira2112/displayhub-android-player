@@ -33,12 +33,7 @@ class LocalVideoCache(context: Context) {
 
     fun localUrl(remoteUrl: String): String {
         if (!isRemoteVideoUrl(remoteUrl)) return remoteUrl
-        if (cachedFile(remoteUrl) == null) {
-            prefetch(remoteUrl)
-            // Keep the original stream until the complete file is available.
-            // The WebView can retry localization when the video element changes.
-            return remoteUrl
-        }
+        if (cachedFile(remoteUrl) == null) prefetch(remoteUrl)
         return localUrlFor(remoteUrl)
     }
 
@@ -109,9 +104,7 @@ class LocalVideoCache(context: Context) {
 
         val remoteUrl = uri.toString()
         if (!isRemoteVideoUrl(remoteUrl)) return null
-        // Never turn an uncached network video request into HTTP 503.
-        // Let the WebView stream it while prefetch completes in the background.
-        val file = cachedFile(remoteUrl) ?: return null
+        val file = cachedFile(remoteUrl) ?: return unavailableResponse()
         return serveFile(request, remoteUrl, file)
     }
 
