@@ -50,8 +50,18 @@ class MainActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         if (prefs.kioskEnabled) enterImmersiveMode()
 
-        if (prefs.activated) showPlayerWaiting()
-        else showActivationScreen()
+        if (prefs.activated) {
+            // The last server-confirmed player URL survives an in-place update. Do not
+            // block the existing screen just because the next assignment poll fails.
+            val savedUrl = prefs.playerUrl
+            if (savedUrl != null && savedUrl.startsWith("https://mgteixeira2112.github.io/displayhub/")) {
+                showWebPlayer(savedUrl)
+            } else {
+                showPlayerWaiting()
+            }
+        } else {
+            showActivationScreen()
+        }
         autoUpdater.checkIfDue()
     }
 
@@ -432,9 +442,10 @@ class MainActivity : AppCompatActivity() {
                     if (webView == null) statusView?.text = "Aguardando playlist ser associada no DisplayHub..."
                 }
             }
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            val failure = connectionStatus(error)
             mainHandler.post {
-                if (webView == null) statusView?.text = "Sem conexão. Tentando novamente automaticamente..."
+                if (webView == null) statusView?.text = failure
             }
         }
 
@@ -443,6 +454,20 @@ class MainActivity : AppCompatActivity() {
             executeRemoteCommand(command)
         } catch (_: Throwable) {
         }
+    }
+
+    private fun connectionStatus(error: Throwable): String {
+        // Never show response bodies: they can include sensitive request information.
+        val category = when (error) {
+            is java.net.UnknownHostException -> "DNS"
+            is java.net.SocketTimeoutException -> "tempo esgotado"
+            is javax.net.ssl.SSLException -> "TLS"
+            is java.net.ConnectException -> "conexão recusada"
+            is IllegalStateException -> Regex("^HTTP (\\d{3})").find(error.message.orEmpty())
+                ?.groupValues?.get(1)?.let { "HTTP $it" } ?: "resposta inválida"
+            else -> "erro de comunicação"
+        }
+        return "Falha ao consultar o servidor ($category). Tentando novamente..."
     }
 
     private fun executeRemoteCommand(command: DisplayHubApi.RemoteCommand) {
