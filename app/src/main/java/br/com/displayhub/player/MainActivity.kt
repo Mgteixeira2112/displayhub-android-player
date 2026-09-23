@@ -21,6 +21,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -39,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private var pairingExecutor: ScheduledExecutorService? = null
     private var webView: WebView? = null
     private var statusView: TextView? = null
+    private var diagnosticView: TextView? = null
     private var currentUrl: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -372,7 +374,32 @@ class MainActivity : AppCompatActivity() {
             loadUrl(url)
         }
         webView = view
-        setContentView(view)
+        val diagnostic = TextView(this).apply {
+            text = ""
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            setBackgroundColor(Color.argb(220, 0, 0, 0))
+            setPadding(18, 12, 18, 12)
+            visibility = View.GONE
+        }
+        diagnosticView = diagnostic
+
+        val root = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            addView(view, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ))
+            addView(diagnostic, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM or Gravity.START,
+            ).apply {
+                leftMargin = 18
+                bottomMargin = 18
+            })
+        }
+        setContentView(root)
         if (prefs.kioskEnabled) enterImmersiveMode()
     }
 
@@ -436,16 +463,24 @@ class MainActivity : AppCompatActivity() {
         try {
             val assignment = api.pollAssignment(prefs.deviceId, prefs.deviceSecret)
             if (assignment.status == "assigned" && !assignment.playerUrl.isNullOrBlank()) {
-                mainHandler.post { showWebPlayer(assignment.playerUrl) }
+                mainHandler.post {
+                    hideDiagnosticOverlay()
+                    showWebPlayer(assignment.playerUrl)
+                }
             } else {
                 mainHandler.post {
+                    hideDiagnosticOverlay()
                     if (webView == null) statusView?.text = "Aguardando playlist ser associada no DisplayHub..."
                 }
             }
         } catch (error: Throwable) {
             val failure = connectionStatus(error)
             mainHandler.post {
-                if (webView == null) statusView?.text = failure
+                if (webView == null) {
+                    statusView?.text = failure
+                } else {
+                    showDiagnosticOverlay(failure)
+                }
             }
         }
 
@@ -454,6 +489,18 @@ class MainActivity : AppCompatActivity() {
             executeRemoteCommand(command)
         } catch (_: Throwable) {
         }
+    }
+
+    private fun showDiagnosticOverlay(message: String) {
+        diagnosticView?.apply {
+            text = "DIAGNÓSTICO ${BuildConfig.VERSION_NAME}\n$message"
+            visibility = View.VISIBLE
+            bringToFront()
+        }
+    }
+
+    private fun hideDiagnosticOverlay() {
+        diagnosticView?.visibility = View.GONE
     }
 
     private fun connectionStatus(error: Throwable): String {
