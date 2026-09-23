@@ -1,0 +1,47 @@
+name: Android Poll Gateway Probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe PostgREST gateway without real device credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ENDPOINT="https://meqeluddtwthqmrtbhbr.supabase.co/rest/v1/rpc/poll_registered_device_assignment"
+          KEY="$(grep -o 'sb_publishable_[A-Za-z0-9_-]*' app/build.gradle.kts | head -n1)"
+          DEVICE_ID="00000000-0000-0000-0000-000000000001"
+          DEVICE_SECRET="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          BODY="{\"p_device_id\":\"$DEVICE_ID\",\"p_device_secret\":\"$DEVICE_SECRET\"}"
+
+          probe() {
+            local name="$1"
+            shift
+            local out="/tmp/${name}.body"
+            local status
+            status="$(curl --fail-with-body --connect-timeout 12 --max-time 25 -sS -o "$out" -w '%{http_code}' \
+              -X POST "$ENDPOINT" \
+              -H "Content-Type: application/json" \
+              -H "apikey: $KEY" \
+              "$@" \
+              --data "$BODY" || true)"
+
+            if grep -q "invalid_device_credentials" "$out" 2>/dev/null; then
+              echo "$name: http=$status reached_rpc=true"
+            else
+              echo "$name: http=$status reached_rpc=false"
+            fi
+          }
+
+          probe "apikey_only"
+          probe "apikey_plus_bearer" -H "Authorization: Bearer $KEY"
