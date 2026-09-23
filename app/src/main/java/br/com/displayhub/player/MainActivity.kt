@@ -374,7 +374,7 @@ class MainActivity : AppCompatActivity() {
             loadUrl(url)
         }
         webView = view
-        diagnosticView = TextView(this).apply {
+        val diagnostic = TextView(this).apply {
             text = ""
             setTextColor(Color.WHITE)
             textSize = 16f
@@ -382,6 +382,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(18, 12, 18, 12)
             visibility = View.GONE
         }
+        diagnosticView = diagnostic
 
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -389,7 +390,7 @@ class MainActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
             ))
-            addView(diagnosticView, FrameLayout.LayoutParams(
+            addView(diagnostic, FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM or Gravity.START,
