@@ -11,8 +11,8 @@ android {
         applicationId = "br.com.displayhub.player"
         minSdk = 23
         targetSdk = 35
-        versionCode = 17
-        versionName = "0.4.12"
+        versionCode = 18
+        versionName = "0.4.13"
 
         val supabaseUrl = providers.gradleProperty("DISPLAYHUB_SUPABASE_URL")
             .orElse("https://meqeluddtwthqmrtbhbr.supabase.co")
@@ -33,7 +33,7 @@ android {
         val keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
         val keyAliasValue = System.getenv("ANDROID_KEY_ALIAS")
         val keyPasswordValue = System.getenv("ANDROID_KEY_PASSWORD")
-        if (!keystoreFile.isNullOrBlank() && !keystorePassword.isNullOrBlank() && !keyAliasValue.isNullOrBlank() && !keyPasswordValue.isNullOrBlank()) {
+        if (!keystoreFile.isNullOrBlank() && !keystorePassword.isNullOrBlank() && !keyAliasValue.isNotBlank().not() && !keyPasswordValue.isNullOrBlank()) {
             create("release") {
                 storeFile = file(keystoreFile)
                 storePassword = keystorePassword
