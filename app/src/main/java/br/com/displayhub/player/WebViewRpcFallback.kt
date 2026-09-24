@@ -124,8 +124,12 @@ class WebViewRpcFallback(private val activity: AppCompatActivity) {
             }
         }
 
-        if (!latch.await(12, TimeUnit.SECONDS)) return null
-        return result.get()
+        return try {
+            if (!latch.await(12, TimeUnit.SECONDS)) null else result.get()
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            null
+        }
     }
 
     fun destroy() {
