@@ -51,17 +51,60 @@ class WebViewRpcFallback(private val activity: AppCompatActivity) {
     }
 
     fun pollAssignment(deviceId: String, deviceSecret: String): DisplayHubApi.Assignment? {
+        val text = rpc(
+            "poll_registered_device_assignment",
+            JSONObject()
+                .put("p_device_id", deviceId)
+                .put("p_device_secret", deviceSecret),
+        ) ?: return null
+        val json = runCatching { JSONObject(text) }.getOrNull() ?: return null
+        return DisplayHubApi.Assignment(
+            status = json.optString("status", "waiting"),
+            playerUrl = json.optString("player_url").takeIf { it.isNotBlank() },
+        )
+    }
+
+    fun pollCommand(deviceId: String, deviceSecret: String): DisplayHubApi.RemoteCommand? {
+        val text = rpc(
+            "poll_windows_player_command",
+            JSONObject()
+                .put("p_device_id", deviceId)
+                .put("p_device_secret", deviceSecret),
+        )?.trim() ?: return null
+        if (text.isEmpty() || text == "null") return null
+        val json = runCatching { JSONObject(text) }.getOrNull() ?: return null
+        val id = json.optString("id")
+        val command = json.optString("command")
+        if (id.isBlank() || command.isBlank()) return null
+        return DisplayHubApi.RemoteCommand(id, command)
+    }
+
+    fun completeCommand(
+        deviceId: String,
+        deviceSecret: String,
+        commandId: String,
+        success: Boolean,
+        result: String,
+    ): Boolean {
+        val text = rpc(
+            "complete_windows_player_command",
+            JSONObject()
+                .put("p_device_id", deviceId)
+                .put("p_device_secret", deviceSecret)
+                .put("p_command_id", commandId)
+                .put("p_success", success)
+                .put("p_result", result.take(500)),
+        )?.trim() ?: return false
+        return text == "true"
+    }
+
+    private fun rpc(name: String, body: JSONObject): String? {
         if (!ready) return null
         val view = webView ?: return null
         val latch = CountDownLatch(1)
-        val result = AtomicReference<DisplayHubApi.Assignment?>(null)
+        val result = AtomicReference<String?>(null)
 
-        val endpoint = BuildConfig.SUPABASE_URL.trimEnd('/') + "/rest/v1/rpc/poll_registered_device_assignment"
-        val payload = JSONObject()
-            .put("p_device_id", deviceId)
-            .put("p_device_secret", deviceSecret)
-            .toString()
-
+        val endpoint = BuildConfig.SUPABASE_URL.trimEnd('/') + "/rest/v1/rpc/" + name
         val script = """
             (async () => {
               try {
@@ -71,7 +114,7 @@ class WebViewRpcFallback(private val activity: AppCompatActivity) {
                     'Content-Type': 'application/json',
                     'apikey': ${JSONObject.quote(BuildConfig.SUPABASE_ANON_KEY)}
                   },
-                  body: ${JSONObject.quote(payload)}
+                  body: ${JSONObject.quote(body.toString())}
                 });
                 const body = await response.text();
                 return JSON.stringify({
@@ -102,22 +145,11 @@ class WebViewRpcFallback(private val activity: AppCompatActivity) {
                         is JSONObject -> decoded
                         else -> null
                     } ?: return@evaluateJavascript
-
-                    if (!envelope.optBoolean("transportOk", false) || !envelope.optBoolean("ok", false)) {
-                        return@evaluateJavascript
+                    if (envelope.optBoolean("transportOk", false) && envelope.optBoolean("ok", false)) {
+                        result.set(envelope.optString("body"))
                     }
-
-                    val body = envelope.optString("body")
-                    if (body.isBlank()) return@evaluateJavascript
-                    val json = JSONObject(body)
-                    result.set(
-                        DisplayHubApi.Assignment(
-                            status = json.optString("status", "waiting"),
-                            playerUrl = json.optString("player_url").takeIf { it.isNotBlank() },
-                        ),
-                    )
                 } catch (_: Throwable) {
-                    // Keep the original native error visible if the isolated browser fallback fails.
+                    // Keep native-path error handling if the isolated browser fallback also fails.
                 } finally {
                     latch.countDown()
                 }
