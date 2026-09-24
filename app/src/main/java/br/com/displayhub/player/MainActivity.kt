@@ -502,11 +502,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        try {
-            val command = api.pollCommand(prefs.deviceId, prefs.deviceSecret) ?: return
-            executeRemoteCommand(command)
+        val command = try {
+            api.pollCommand(prefs.deviceId, prefs.deviceSecret)
         } catch (_: Throwable) {
+            webViewRpcFallback?.pollCommand(prefs.deviceId, prefs.deviceSecret)
         }
+        if (command != null) executeRemoteCommand(command)
     }
 
     private fun showDiagnosticOverlay(message: String) {
@@ -578,6 +579,13 @@ class MainActivity : AppCompatActivity() {
             try {
                 api.completeCommand(prefs.deviceId, prefs.deviceSecret, command.id, success, result)
             } catch (_: Throwable) {
+                webViewRpcFallback?.completeCommand(
+                    prefs.deviceId,
+                    prefs.deviceSecret,
+                    command.id,
+                    success,
+                    result,
+                )
             }
         }
     }
