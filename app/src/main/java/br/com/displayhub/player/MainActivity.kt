@@ -41,6 +41,7 @@ class MainActivity : AppCompatActivity() {
     private var webView: WebView? = null
     private var statusView: TextView? = null
     private var diagnosticView: TextView? = null
+    private var webViewRpcFallback: WebViewRpcFallback? = null
     private var currentUrl: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,6 +83,8 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         stopManagedLoop()
         stopPairingLoop()
+        webViewRpcFallback?.destroy()
+        webViewRpcFallback = null
         webView?.destroy()
         webView = null
         super.onDestroy()
@@ -343,6 +346,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showWebPlayer(url: String) {
         if (currentUrl == url && webView != null) return
+        webViewRpcFallback?.destroy()
+        webViewRpcFallback = null
         currentUrl = url
         prefs.playerUrl = url
 
@@ -399,6 +404,7 @@ class MainActivity : AppCompatActivity() {
                 bottomMargin = 18
             })
         }
+        webViewRpcFallback = WebViewRpcFallback(this).also { it.attach(root) }
         setContentView(root)
         if (prefs.kioskEnabled) enterImmersiveMode()
     }
@@ -474,12 +480,24 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         } catch (error: Throwable) {
-            val failure = connectionStatus(error)
-            mainHandler.post {
-                if (webView == null) {
-                    statusView?.text = failure
-                } else {
-                    showDiagnosticOverlay(failure)
+            val recovered = webViewRpcFallback?.pollAssignment(prefs.deviceId, prefs.deviceSecret)
+            if (recovered != null) {
+                mainHandler.post {
+                    hideDiagnosticOverlay()
+                    if (recovered.status == "assigned" && !recovered.playerUrl.isNullOrBlank()) {
+                        showWebPlayer(recovered.playerUrl)
+                    } else if (webView == null) {
+                        statusView?.text = "Aguardando playlist ser associada no DisplayHub..."
+                    }
+                }
+            } else {
+                val failure = connectionStatus(error)
+                mainHandler.post {
+                    if (webView == null) {
+                        statusView?.text = failure
+                    } else {
+                        showDiagnosticOverlay(failure)
+                    }
                 }
             }
         }
