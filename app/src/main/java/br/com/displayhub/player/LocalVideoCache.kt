@@ -33,8 +33,11 @@ class LocalVideoCache(context: Context) {
 
     fun localUrl(remoteUrl: String): String {
         if (!isRemoteVideoUrl(remoteUrl)) return remoteUrl
-        if (cachedFile(remoteUrl) == null) prefetch(remoteUrl)
-        return localUrlFor(remoteUrl)
+        if (cachedFile(remoteUrl) != null) return localUrlFor(remoteUrl)
+        prefetch(remoteUrl)
+        // Keep the visible video on the original network URL until the cache is ready.
+        // Switching to displayhub.local too early turns a healthy remote stream into a 503.
+        return remoteUrl
     }
 
     fun prefetchAll(remoteUrls: Collection<String>) {
@@ -104,7 +107,7 @@ class LocalVideoCache(context: Context) {
 
         val remoteUrl = uri.toString()
         if (!isRemoteVideoUrl(remoteUrl)) return null
-        val file = cachedFile(remoteUrl) ?: return unavailableResponse()
+        val file = cachedFile(remoteUrl) ?: return null
         return serveFile(request, remoteUrl, file)
     }
 
