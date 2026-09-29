@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -26,6 +27,11 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -39,6 +45,9 @@ class MainActivity : AppCompatActivity() {
     private var executor: ScheduledExecutorService? = null
     private var pairingExecutor: ScheduledExecutorService? = null
     private var webView: WebView? = null
+    private var nativeVideoPlayer: ExoPlayer? = null
+    private var nativeVideoView: PlayerView? = null
+    private var nativeVideoUrl: String? = null
     private var statusView: TextView? = null
     private var diagnosticView: TextView? = null
     private var webViewRpcFallback: WebViewRpcFallback? = null
@@ -91,6 +100,7 @@ class MainActivity : AppCompatActivity() {
         stopPairingLoop()
         webViewRpcFallback?.destroy()
         webViewRpcFallback = null
+        releaseNativeBackground()
         webView?.destroy()
         webView = null
         super.onDestroy()
@@ -352,13 +362,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun showWebPlayer(url: String) {
         if (currentUrl == url && webView != null) return
+        stopNativeBackground()
         webViewRpcFallback?.destroy()
         webViewRpcFallback = null
         currentUrl = url
         prefs.playerUrl = url
 
         val view = WebView(this).apply {
-            setBackgroundColor(Color.BLACK)
+            setBackgroundColor(Color.TRANSPARENT)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
@@ -368,7 +379,14 @@ class MainActivity : AppCompatActivity() {
             settings.setSupportZoom(false)
             isVerticalScrollBarEnabled = false
             isHorizontalScrollBarEnabled = false
-            addJavascriptInterface(DisplayHubVideoBridge(videoCache), "DisplayHubAndroid")
+            addJavascriptInterface(
+                DisplayHubVideoBridge(
+                    videoCache,
+                    nativeBackgroundStart = ::startNativeBackground,
+                    nativeBackgroundStop = ::stopNativeBackground,
+                ),
+                "DisplayHubAndroid",
+            )
             webChromeClient = WebChromeClient()
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = false
@@ -395,8 +413,21 @@ class MainActivity : AppCompatActivity() {
         }
         diagnosticView = diagnostic
 
+        val nativeLayer = PlayerView(this).apply {
+            useController = false
+            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            setShutterBackgroundColor(Color.TRANSPARENT)
+            setBackgroundColor(Color.BLACK)
+            visibility = View.GONE
+        }
+        nativeVideoView = nativeLayer
+
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
+            addView(nativeLayer, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ))
             addView(view, FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -458,6 +489,52 @@ class MainActivity : AppCompatActivity() {
         """.trimIndent()
         view?.evaluateJavascript(script, null)
     }
+
+    private fun startNativeBackground(url: String): Boolean {
+        if (!isAllowedNativeBackgroundUrl(url)) return false
+        mainHandler.post {
+            val player = nativeVideoPlayer ?: ExoPlayer.Builder(this).build().also { created ->
+                created.repeatMode = Player.REPEAT_MODE_ONE
+                created.volume = 0f
+                nativeVideoPlayer = created
+                nativeVideoView?.player = created
+            }
+
+            if (nativeVideoUrl != url) {
+                nativeVideoUrl = url
+                player.setMediaItem(MediaItem.fromUri(url))
+                player.prepare()
+            }
+            nativeVideoView?.visibility = View.VISIBLE
+            player.playWhenReady = true
+        }
+        return true
+    }
+
+    private fun stopNativeBackground() {
+        mainHandler.post {
+            nativeVideoUrl = null
+            nativeVideoPlayer?.stop()
+            nativeVideoPlayer?.clearMediaItems()
+            nativeVideoView?.visibility = View.GONE
+        }
+    }
+
+    private fun releaseNativeBackground() {
+        nativeVideoView?.player = null
+        nativeVideoView = null
+        nativeVideoPlayer?.release()
+        nativeVideoPlayer = null
+        nativeVideoUrl = null
+    }
+
+    private fun isAllowedNativeBackgroundUrl(rawUrl: String): Boolean = runCatching {
+        val uri = Uri.parse(rawUrl)
+        uri.scheme.equals("https", ignoreCase = true) &&
+            uri.host.equals("mgteixeira2112.github.io", ignoreCase = true) &&
+            uri.path == "/displayhub/android-video-tests/pexels-7199576-h264-baseline.mp4" &&
+            uri.userInfo == null
+    }.getOrDefault(false)
 
     private fun startManagedLoop() {
         if (executor?.isShutdown == false) return

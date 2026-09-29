@@ -292,7 +292,11 @@ class LocalVideoCache(context: Context) {
     }
 }
 
-class DisplayHubVideoBridge(private val cache: LocalVideoCache) {
+class DisplayHubVideoBridge(
+    private val cache: LocalVideoCache,
+    private val nativeBackgroundStart: (String) -> Boolean = { false },
+    private val nativeBackgroundStop: () -> Unit = {},
+) {
     @JavascriptInterface
     fun localizeVideo(url: String): String = cache.localUrl(url)
 
@@ -307,6 +311,15 @@ class DisplayHubVideoBridge(private val cache: LocalVideoCache) {
     fun videoCacheStatus(urlsJson: String): String {
         val urls = parseUrls(urlsJson)
         return cache.snapshot(urls).toString()
+    }
+
+    @JavascriptInterface
+    fun playNativeBackground(url: String): Boolean = nativeBackgroundStart(url)
+
+    @JavascriptInterface
+    fun stopNativeBackground(): Boolean {
+        nativeBackgroundStop()
+        return true
     }
 
     private fun parseUrls(urlsJson: String): List<String> = runCatching {
