@@ -71,14 +71,19 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (prefs.kioskEnabled) enterImmersiveMode()
+        if (prefs.kioskEnabled) {
+            tryStartLockTask()
+            enterImmersiveMode()
+        } else {
+            exitImmersiveMode()
+        }
         if (prefs.activated) startManagedLoop()
         autoUpdater.checkIfDue()
     }
 
     override fun onPause() {
         super.onPause()
-        stopManagedLoop()
+        if (prefs.kioskEnabled) stopManagedLoop()
     }
 
     override fun onDestroy() {
@@ -578,6 +583,9 @@ class MainActivity : AppCompatActivity() {
             }
             "enter_kiosk" -> mainHandler.post {
                 prefs.kioskEnabled = true
+                val intent = Intent(this, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                startActivity(intent)
                 val locked = tryStartLockTask()
                 enterImmersiveMode()
                 completeCommand(command, true, if (locked) "android:lock_task" else "android:immersive")
@@ -586,7 +594,13 @@ class MainActivity : AppCompatActivity() {
                 prefs.kioskEnabled = false
                 tryStopLockTask()
                 exitImmersiveMode()
-                completeCommand(command, true, "android:kiosk_exited")
+                completeCommand(command, true, "android:kiosk_home")
+                mainHandler.postDelayed({
+                    val homeIntent = Intent(Intent.ACTION_MAIN)
+                        .addCategory(Intent.CATEGORY_HOME)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(homeIntent)
+                }, 250)
             }
             "reboot_device" -> mainHandler.post {
                 val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
@@ -620,6 +634,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun tryStartLockTask(): Boolean {
         return try {
+            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            if (!dpm.isLockTaskPermitted(packageName)) return false
             val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             if (activityManager.lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE) startLockTask()
             true
@@ -636,6 +652,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun enterImmersiveMode() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_FULLSCREEN or
@@ -648,8 +665,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun exitImmersiveMode() {
+        WindowCompat.setDecorFitsSystemWindows(window, true)
         @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
     }
 
     private fun linearMatchWrap() = LinearLayout.LayoutParams(
