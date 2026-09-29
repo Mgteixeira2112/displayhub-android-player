@@ -43,6 +43,7 @@ class MainActivity : AppCompatActivity() {
     private var diagnosticView: TextView? = null
     private var webViewRpcFallback: WebViewRpcFallback? = null
     private var currentUrl: String? = null
+    @Volatile private var repairingIdentity = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -480,6 +481,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         } catch (error: Throwable) {
+            if (repairInvalidIdentity(error)) return
+
             val recovered = webViewRpcFallback?.pollAssignment(prefs.deviceId, prefs.deviceSecret)
             if (recovered != null) {
                 mainHandler.post {
@@ -508,6 +511,31 @@ class MainActivity : AppCompatActivity() {
             webViewRpcFallback?.pollCommand(prefs.deviceId, prefs.deviceSecret)
         }
         if (command != null) executeRemoteCommand(command)
+    }
+
+    private fun repairInvalidIdentity(error: Throwable): Boolean {
+        if (!isInvalidDeviceCredentials(error) || repairingIdentity) return false
+        repairingIdentity = true
+        mainHandler.post {
+            stopManagedLoop()
+            stopPairingLoop()
+            webViewRpcFallback?.destroy()
+            webViewRpcFallback = null
+            webView?.destroy()
+            webView = null
+            currentUrl = null
+            diagnosticView = null
+            statusView = null
+            prefs.resetIdentityForRepair()
+            showActivationScreen()
+            repairingIdentity = false
+        }
+        return true
+    }
+
+    private fun isInvalidDeviceCredentials(error: Throwable): Boolean {
+        return error is IllegalStateException &&
+            error.message.orEmpty().contains("invalid_device_credentials", ignoreCase = true)
     }
 
     private fun showDiagnosticOverlay(message: String) {
