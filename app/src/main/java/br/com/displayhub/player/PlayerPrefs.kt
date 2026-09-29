@@ -33,6 +33,15 @@ class PlayerPrefs(context: Context) {
         get() = prefs.getBoolean("kiosk_enabled", true)
         set(value) = prefs.edit().putBoolean("kiosk_enabled", value).apply()
 
+    fun resetIdentityForRepair() {
+        prefs.edit()
+            .remove("device_id")
+            .remove("device_secret")
+            .remove("player_url")
+            .putBoolean("activated", false)
+            .apply()
+    }
+
     private fun randomHex(bytes: Int): String {
         val data = ByteArray(bytes)
         SecureRandom().nextBytes(data)
