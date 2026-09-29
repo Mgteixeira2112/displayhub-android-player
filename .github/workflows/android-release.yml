@@ -17,7 +17,60 @@ env:
   ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
 jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      should_publish: ${{ steps.gate.outputs.should_publish }}
+      reason: ${{ steps.gate.outputs.reason }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether release should publish
+        id: gate
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "reason=manual_dispatch" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BEFORE="${{ github.event.before }}"
+          ZERO_SHA="0000000000000000000000000000000000000000"
+
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "$ZERO_SHA" ]; then
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "reason=no_previous_commit" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CURRENT_VERSION_CODE=$(grep -m1 'versionCode = ' app/build.gradle.kts | sed -E 's/.*versionCode = ([0-9]+).*/\1/')
+          CURRENT_VERSION_NAME=$(grep -m1 'versionName = ' app/build.gradle.kts | sed -E 's/.*versionName = "([^"]+)".*/\1/')
+
+          PREVIOUS_BUILD_GRADLE=$(git show "$BEFORE:app/build.gradle.kts" 2>/dev/null || true)
+          if [ -z "$PREVIOUS_BUILD_GRADLE" ]; then
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "reason=no_previous_build_gradle" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PREVIOUS_VERSION_CODE=$(printf '%s\n' "$PREVIOUS_BUILD_GRADLE" | grep -m1 'versionCode = ' | sed -E 's/.*versionCode = ([0-9]+).*/\1/')
+          PREVIOUS_VERSION_NAME=$(printf '%s\n' "$PREVIOUS_BUILD_GRADLE" | grep -m1 'versionName = ' | sed -E 's/.*versionName = "([^"]+)".*/\1/')
+
+          if [ "$CURRENT_VERSION_CODE" != "$PREVIOUS_VERSION_CODE" ] || [ "$CURRENT_VERSION_NAME" != "$PREVIOUS_VERSION_NAME" ]; then
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "reason=version_changed" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "reason=version_unchanged" >> "$GITHUB_OUTPUT"
+            echo "Android version unchanged; release publication skipped."
+          fi
+
   publish:
+    needs: release-gate
+    if: needs.release-gate.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
