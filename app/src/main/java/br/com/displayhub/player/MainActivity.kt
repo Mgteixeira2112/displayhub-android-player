@@ -28,6 +28,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -490,12 +491,36 @@ class MainActivity : AppCompatActivity() {
         view?.evaluateJavascript(script, null)
     }
 
+    private fun notifyNativeBackgroundState(state: String) {
+        webView?.evaluateJavascript(
+            "window.dispatchEvent(new CustomEvent('displayhub-native-video-state',{detail:{state:'$state'}}));",
+            null,
+        )
+    }
+
     private fun startNativeBackground(url: String): Boolean {
         if (!isAllowedNativeBackgroundUrl(url)) return false
         mainHandler.post {
+            nativeVideoView?.visibility = View.GONE
             val player = nativeVideoPlayer ?: ExoPlayer.Builder(this).build().also { created ->
                 created.repeatMode = Player.REPEAT_MODE_ONE
                 created.volume = 0f
+                created.addListener(object : Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_READY && nativeVideoUrl != null) {
+                            nativeVideoView?.visibility = View.VISIBLE
+                            notifyNativeBackgroundState("ready")
+                        }
+                    }
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        nativeVideoView?.visibility = View.GONE
+                        nativeVideoUrl = null
+                        created.stop()
+                        created.clearMediaItems()
+                        notifyNativeBackgroundState("error")
+                    }
+                })
                 nativeVideoPlayer = created
                 nativeVideoView?.player = created
             }
@@ -505,7 +530,6 @@ class MainActivity : AppCompatActivity() {
                 player.setMediaItem(MediaItem.fromUri(url))
                 player.prepare()
             }
-            nativeVideoView?.visibility = View.VISIBLE
             player.playWhenReady = true
         }
         return true
