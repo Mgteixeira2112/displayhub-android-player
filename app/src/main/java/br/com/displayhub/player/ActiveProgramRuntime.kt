@@ -25,8 +25,8 @@ class ActiveProgramRuntime(context: Context) {
 
     fun intercept(request: WebResourceRequest): WebResourceResponse? {
         val active = readyActive() ?: return null
-        val requestUrl = request.url.toString()
-        val asset = active.assets.firstOrNull { it.url == requestUrl } ?: return null
+        val requestKey = canonicalAssetKey(request.url.toString())
+        val asset = active.assets.firstOrNull { canonicalAssetKey(it.url) == requestKey } ?: return null
         val file = cache.localFile(asset) ?: return null
         return serveFile(request, asset, file)
     }
@@ -52,6 +52,23 @@ class ActiveProgramRuntime(context: Context) {
         return active.takeIf { manifest ->
             manifest.assets.all { cache.status(it) == AssetStatus.READY }
         }
+    }
+
+    /**
+     * Supabase signed URLs change their query token over time. The storage object path remains
+     * stable, so ACTIVE matching deliberately ignores query/fragment while preserving scheme,
+     * host and path. This lets the WebView request a freshly signed URL and still receive the
+     * integrity-checked local asset cached from the manifest.
+     */
+    private fun canonicalAssetKey(rawUrl: String): String = runCatching {
+        val uri = Uri.parse(rawUrl)
+        uri.buildUpon()
+            .clearQuery()
+            .fragment(null)
+            .build()
+            .toString()
+    }.getOrElse {
+        rawUrl.substringBefore('?').substringBefore('#')
     }
 
     private fun serveFile(
