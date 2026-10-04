@@ -33,6 +33,7 @@ class ProgramSlotStore(
         directory.listFiles()
             ?.filter { it.isFile && it.name.endsWith(TEMP_SUFFIX) }
             ?.forEach { it.delete() }
+        cache.setPinnedSha256(pinnedSha256())
     }
 
     fun active(): ProgramManifest? = readSlot(ACTIVE_FILE)
@@ -54,6 +55,8 @@ class ProgramSlotStore(
             }
         }
 
+        // Protect the known-good program before staging downloads can trigger automatic LRU trim.
+        cache.setPinnedSha256(activeHashes(active))
         writeSlot(STAGING_FILE, manifest)
         cache.prefetch(manifest)
         Log.i(TAG, "program_staged version=${manifest.programVersion} assets=${manifest.assets.size}")
@@ -100,43 +103,40 @@ class ProgramSlotStore(
         return true
     }
 
-    /**
-     * Restores PREVIOUS as ACTIVE when all of its assets are still valid in the cache.
-     *
-     * The manifest that was ACTIVE before rollback becomes the new PREVIOUS, enabling a safe
-     * forward/back swap without deleting either program's metadata.
-     */
+    /** Restores PREVIOUS as ACTIVE when every asset of the rollback target is still valid. */
     @Synchronized
     fun rollback(): Boolean {
         val rollbackTarget = previous() ?: return false
         if (!allAssetsReady(rollbackTarget)) return false
 
         val current = active()
+        writeSlot(ACTIVE_FILE, rollbackTarget)
         if (current != null) {
             writeSlot(PREVIOUS_FILE, current)
         } else {
             slotFile(PREVIOUS_FILE).delete()
         }
-
-        writeSlot(ACTIVE_FILE, rollbackTarget)
         pinAndTrim(rollbackTarget)
 
         Log.w(TAG, "program_rollback version=${rollbackTarget.programVersion}")
         return true
     }
 
-    fun pinnedSha256(): Set<String> = active()
+    fun pinnedSha256(): Set<String> = activeHashes(active())
+
+    private fun activeHashes(manifest: ProgramManifest?): Set<String> = manifest
         ?.assets
         ?.mapTo(linkedSetOf()) { it.sha256.lowercase() }
-        .orEmpty()
+        ?: emptySet()
 
     private fun allAssetsReady(manifest: ProgramManifest): Boolean = manifest.assets.all {
         cache.status(it) == AssetStatus.READY
     }
 
     private fun pinAndTrim(manifest: ProgramManifest) {
-        val pinned = manifest.assets.mapTo(linkedSetOf()) { it.sha256.lowercase() }
-        cache.trim(pinned)
+        val pinned = activeHashes(manifest)
+        cache.setPinnedSha256(pinned)
+        cache.trim()
     }
 
     private fun readSlot(name: String): ProgramManifest? {
