@@ -19,24 +19,33 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class LocalVideoCache(context: Context) {
     companion object {
         private const val TAG = "DisplayHubVideoCache"
     }
 
+    private val activeProgramRuntime = ActiveProgramRuntime(context)
     private val directory = File(context.filesDir, "displayhub-videos").apply { mkdirs() }
     private val locks = ConcurrentHashMap<String, Any>()
     private val downloads = ConcurrentHashMap.newKeySet<String>()
     private val failures = ConcurrentHashMap.newKeySet<String>()
     private val downloader = Executors.newSingleThreadExecutor()
+    private val programSynchronizer = ProgramSynchronizer(context)
+    private val programSyncExecutor = Executors.newSingleThreadScheduledExecutor().apply {
+        scheduleWithFixedDelay(
+            { runCatching { programSynchronizer.tick() } },
+            2,
+            2,
+            TimeUnit.SECONDS,
+        )
+    }
 
     fun localUrl(remoteUrl: String): String {
         if (!isRemoteVideoUrl(remoteUrl)) return remoteUrl
         if (cachedFile(remoteUrl) != null) return localUrlFor(remoteUrl)
         prefetch(remoteUrl)
-        // Keep the visible video on the original network URL until the cache is ready.
-        // Switching to displayhub.local too early turns a healthy remote stream into a 503.
         return remoteUrl
     }
 
@@ -94,7 +103,28 @@ class LocalVideoCache(context: Context) {
             .put("items", items)
     }
 
+    fun offerProgramManifest(manifestJson: String): JSONObject = runCatching {
+        val manifest = ProgramManifest.fromJson(JSONObject(manifestJson))
+        val result = programSynchronizer.offer(manifest)
+        JSONObject()
+            .put("ok", true)
+            .put("result", result.name)
+            .put("status", programSynchronizer.status())
+    }.getOrElse { error ->
+        Log.w(TAG, "program_manifest_rejected", error)
+        JSONObject()
+            .put("ok", false)
+            .put("error", error.message ?: error.javaClass.simpleName)
+            .put("status", programSynchronizer.status())
+    }
+
+    fun programSyncStatus(): JSONObject = programSynchronizer.status()
+
+    fun activeProgramStatus(): JSONObject = activeProgramRuntime.snapshot()
+
     fun intercept(request: WebResourceRequest): WebResourceResponse? {
+        activeProgramRuntime.intercept(request)?.let { return it }
+
         val uri = request.url
         if (uri.host == "displayhub.local" && uri.path.orEmpty().startsWith("/video/")) {
             val encoded = uri.lastPathSegment ?: return unavailableResponse()
@@ -312,6 +342,15 @@ class DisplayHubVideoBridge(
         val urls = parseUrls(urlsJson)
         return cache.snapshot(urls).toString()
     }
+
+    @JavascriptInterface
+    fun offerProgramManifest(manifestJson: String): String = cache.offerProgramManifest(manifestJson).toString()
+
+    @JavascriptInterface
+    fun programSyncStatus(): String = cache.programSyncStatus().toString()
+
+    @JavascriptInterface
+    fun activeProgramStatus(): String = cache.activeProgramStatus().toString()
 
     @JavascriptInterface
     fun playNativeBackground(url: String): Boolean = nativeBackgroundStart(url)
