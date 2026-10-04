@@ -30,6 +30,7 @@ class UniversalAssetCache(
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val READ_TIMEOUT_MS = 60_000
         private const val COPY_BUFFER_BYTES = 256 * 1024
+        private const val PART_SUFFIX = ".part"
         private const val DEFAULT_MAX_BYTES = 2L * 1024L * 1024L * 1024L
     }
 
@@ -154,15 +155,11 @@ class UniversalAssetCache(
         var total = files.sumOf { it.length() }
         if (total <= maxBytes) return
 
-        files
-            .asSequence()
-            .filterNot { pinnedSha256.contains(it.name) }
-            .sortedBy { it.lastModified() }
-            .forEach { file ->
-                if (total <= maxBytes) return
-                val size = file.length()
-                if (file.delete()) total -= size
-            }
+        for (file in files.filterNot { pinnedSha256.contains(it.name) }.sortedBy { it.lastModified() }) {
+            if (total <= maxBytes) break
+            val size = file.length()
+            if (file.delete()) total -= size
+        }
     }
 
     private fun downloadAndCommit(asset: AssetManifest) {
@@ -243,9 +240,5 @@ class UniversalAssetCache(
             }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
-    }
-
-    private companion object Internal {
-        private const val PART_SUFFIX = ".part"
     }
 }
