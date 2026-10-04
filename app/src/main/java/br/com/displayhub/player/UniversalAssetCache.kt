@@ -17,9 +17,6 @@ import java.util.concurrent.Executors
  * Files are keyed by the expected SHA-256 instead of their remote URL. This makes cache identity
  * stable when URLs change and, more importantly, prevents a changed file at the same URL from
  * being accepted as the asset declared by a manifest.
- *
- * This foundation is intentionally not wired into playback yet. A3 will use it while staging a
- * complete program before an atomic activation.
  */
 class UniversalAssetCache(
     context: Context,
@@ -38,6 +35,9 @@ class UniversalAssetCache(
     private val downloads = ConcurrentHashMap.newKeySet<String>()
     private val failures = ConcurrentHashMap<String, String>()
     private val executor = Executors.newFixedThreadPool(2)
+
+    @Volatile
+    private var pinnedSha256: Set<String> = emptySet()
 
     init {
         require(maxBytes > 0L) { "maxBytes must be positive" }
@@ -141,13 +141,23 @@ class UniversalAssetCache(
             .put("items", items)
     }
 
+    /** Protects ACTIVE program assets from every automatic cache trim, including staging downloads. */
+    fun setPinnedSha256(values: Set<String>) {
+        pinnedSha256 = values.mapTo(hashSetOf()) { it.lowercase() }
+    }
+
     /**
      * Evicts least-recently-used assets until the configured budget is met.
      *
-     * A3 will pass the active program's hashes in [pinnedSha256] so active content can never be
-     * removed while old/orphaned assets are reclaimed.
+     * Assets registered through [setPinnedSha256] are always protected. Callers may also pass
+     * temporary additional hashes that must survive this trim operation.
      */
-    fun trim(pinnedSha256: Set<String> = emptySet()) {
+    fun trim(additionalPinnedSha256: Set<String> = emptySet()) {
+        val protected = if (additionalPinnedSha256.isEmpty()) {
+            pinnedSha256
+        } else {
+            pinnedSha256 + additionalPinnedSha256.map { it.lowercase() }
+        }
         val files = directory.listFiles()
             ?.filter { it.isFile && !it.name.endsWith(PART_SUFFIX) }
             .orEmpty()
@@ -155,7 +165,7 @@ class UniversalAssetCache(
         var total = files.sumOf { it.length() }
         if (total <= maxBytes) return
 
-        for (file in files.filterNot { pinnedSha256.contains(it.name) }.sortedBy { it.lastModified() }) {
+        for (file in files.filterNot { protected.contains(it.name) }.sortedBy { it.lastModified() }) {
             if (total <= maxBytes) break
             val size = file.length()
             if (file.delete()) total -= size
