@@ -25,6 +25,7 @@ class LocalVideoCache(context: Context) {
         private const val TAG = "DisplayHubVideoCache"
     }
 
+    private val activeProgramRuntime = ActiveProgramRuntime(context)
     private val directory = File(context.filesDir, "displayhub-videos").apply { mkdirs() }
     private val locks = ConcurrentHashMap<String, Any>()
     private val downloads = ConcurrentHashMap.newKeySet<String>()
@@ -94,7 +95,11 @@ class LocalVideoCache(context: Context) {
             .put("items", items)
     }
 
+    fun activeProgramStatus(): JSONObject = activeProgramRuntime.snapshot()
+
     fun intercept(request: WebResourceRequest): WebResourceResponse? {
+        activeProgramRuntime.intercept(request)?.let { return it }
+
         val uri = request.url
         if (uri.host == "displayhub.local" && uri.path.orEmpty().startsWith("/video/")) {
             val encoded = uri.lastPathSegment ?: return unavailableResponse()
@@ -312,6 +317,9 @@ class DisplayHubVideoBridge(
         val urls = parseUrls(urlsJson)
         return cache.snapshot(urls).toString()
     }
+
+    @JavascriptInterface
+    fun activeProgramStatus(): String = cache.activeProgramStatus().toString()
 
     @JavascriptInterface
     fun playNativeBackground(url: String): Boolean = nativeBackgroundStart(url)
