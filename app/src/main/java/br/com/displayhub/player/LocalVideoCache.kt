@@ -19,6 +19,7 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class LocalVideoCache(context: Context) {
     companion object {
@@ -30,6 +31,15 @@ class LocalVideoCache(context: Context) {
     private val downloads = ConcurrentHashMap.newKeySet<String>()
     private val failures = ConcurrentHashMap.newKeySet<String>()
     private val downloader = Executors.newSingleThreadExecutor()
+    private val programSynchronizer = ProgramSynchronizer(context)
+    private val programSyncExecutor = Executors.newSingleThreadScheduledExecutor().apply {
+        scheduleWithFixedDelay(
+            { runCatching { programSynchronizer.tick() } },
+            2,
+            2,
+            TimeUnit.SECONDS,
+        )
+    }
 
     fun localUrl(remoteUrl: String): String {
         if (!isRemoteVideoUrl(remoteUrl)) return remoteUrl
@@ -93,6 +103,23 @@ class LocalVideoCache(context: Context) {
             .put("missing", missing)
             .put("items", items)
     }
+
+    fun offerProgramManifest(manifestJson: String): JSONObject = runCatching {
+        val manifest = ProgramManifest.fromJson(JSONObject(manifestJson))
+        val result = programSynchronizer.offer(manifest)
+        JSONObject()
+            .put("ok", true)
+            .put("result", result.name)
+            .put("status", programSynchronizer.status())
+    }.getOrElse { error ->
+        Log.w(TAG, "program_manifest_rejected", error)
+        JSONObject()
+            .put("ok", false)
+            .put("error", error.message ?: error.javaClass.simpleName)
+            .put("status", programSynchronizer.status())
+    }
+
+    fun programSyncStatus(): JSONObject = programSynchronizer.status()
 
     fun intercept(request: WebResourceRequest): WebResourceResponse? {
         val uri = request.url
@@ -312,6 +339,12 @@ class DisplayHubVideoBridge(
         val urls = parseUrls(urlsJson)
         return cache.snapshot(urls).toString()
     }
+
+    @JavascriptInterface
+    fun offerProgramManifest(manifestJson: String): String = cache.offerProgramManifest(manifestJson).toString()
+
+    @JavascriptInterface
+    fun programSyncStatus(): String = cache.programSyncStatus().toString()
 
     @JavascriptInterface
     fun playNativeBackground(url: String): Boolean = nativeBackgroundStart(url)
