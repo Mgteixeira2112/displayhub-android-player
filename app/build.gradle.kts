@@ -11,8 +11,8 @@ android {
         applicationId = "br.com.displayhub.player"
         minSdk = 23
         targetSdk = 35
-        versionCode = 27
-        versionName = "0.4.22"
+        versionCode = 28
+        versionName = "0.4.23-selfhost-test"
 
         val supabaseUrl = providers.gradleProperty("DISPLAYHUB_SUPABASE_URL")
             .orElse("https://displayhub-backend.invalid")

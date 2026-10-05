@@ -117,7 +117,10 @@ jobs:
 
       - name: Build signed release APK
         if: steps.signing.outputs.enabled == 'true'
-        run: gradle :app:assembleRelease
+        run: |
+          gradle :app:assembleRelease \
+            -PDISPLAYHUB_SUPABASE_URL="${{ vars.DISPLAYHUB_SUPABASE_URL }}" \
+            -PDISPLAYHUB_SUPABASE_ANON_KEY="${{ vars.DISPLAYHUB_SUPABASE_PUBLISHABLE_KEY }}"
 
       - name: Build update site
         if: steps.signing.outputs.enabled == 'true'
