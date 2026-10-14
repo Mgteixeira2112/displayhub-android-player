@@ -15,11 +15,11 @@ android {
         versionName = "0.4.22"
 
         val supabaseUrl = providers.gradleProperty("DISPLAYHUB_SUPABASE_URL")
-            .orElse("https://meqeluddtwthqmrtbhbr.supabase.co")
+            .orElse("https://displayhub-backend.invalid")
             .get()
         val configuredKey = providers.gradleProperty("DISPLAYHUB_SUPABASE_ANON_KEY").orNull?.trim()
         val publishableKey = configuredKey?.takeIf { it.isNotEmpty() }
-            ?: "sb_publishable_yjnvIPUmi8-Kt7yTFibw3w_DQlawViE"
+            ?: "sb_publishable_not_configured"
         val updateManifestUrl = providers.gradleProperty("DISPLAYHUB_UPDATE_MANIFEST_URL")
             .orElse("https://mgteixeira2112.github.io/displayhub-android-player/latest.json")
             .get()
