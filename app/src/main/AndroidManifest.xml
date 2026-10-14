@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
+        android:name=".DisplayHubApplication"
         android:allowBackup="false"
         android:label="DisplayHub Player"
         android:supportsRtl="true"

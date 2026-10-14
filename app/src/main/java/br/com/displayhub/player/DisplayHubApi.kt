@@ -90,6 +90,24 @@ class DisplayHubApi {
         )
     }
 
+    fun reportRuntime(
+        deviceId: String,
+        deviceSecret: String,
+        appVersion: String,
+        kioskMode: Boolean,
+        runtimeStatus: JSONObject,
+    ) {
+        rpcRaw(
+            "report_registered_device_runtime",
+            JSONObject()
+                .put("p_device_id", deviceId)
+                .put("p_device_secret", deviceSecret)
+                .put("p_app_version", appVersion)
+                .put("p_kiosk_mode", kioskMode)
+                .put("p_runtime_status", runtimeStatus),
+        )
+    }
+
     fun pollCommand(deviceId: String, deviceSecret: String): RemoteCommand? {
         val result = rpcNullable(
             "poll_windows_player_command",
